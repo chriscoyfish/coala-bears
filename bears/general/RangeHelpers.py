@@ -10,7 +10,7 @@ def get_specified_block_range(file,
                               filename,
                               open_specifier,
                               close_specifier,
-                              annotation_dict):
+                              ranges):
     """
     Gets a sourceranges of all the indentation blocks present inside the
     file.
@@ -22,8 +22,8 @@ def get_specified_block_range(file,
                             block has begun.
     :param close_specifier: A character or string indicating that the block
                             has ended.
-    :param annotation_dict: A dictionary containing sourceranges of all the
-                            strings and comments within a file.
+    :param ranges:          A dict contating ranges of various code
+                            segments.
     :return:                A tuple whith the first source range being
                             the range of the outermost indentation while
                             last being the range of the most
@@ -31,12 +31,12 @@ def get_specified_block_range(file,
                             Equal level indents appear in the order of
                             first encounter or left to right.
     """
-    ranges = []
+    indent_ranges = []
 
     open_pos = list(get_valid_sequences(
-        file, open_specifier, annotation_dict))
+        file, open_specifier, ranges))
     close_pos = list(get_valid_sequences(
-        file, close_specifier, annotation_dict))
+        file, close_specifier, ranges))
 
     number_of_encaps = len(open_pos)
     if number_of_encaps != len(close_pos):
@@ -64,7 +64,7 @@ def get_specified_block_range(file,
                 except IndexError:
                     raise UnmatchedIndentError(open_specifier,
                                                close_specifier)
-                ranges.append(SourceRange.from_values(
+                indent_ranges.append(SourceRange.from_values(
                     filename,
                     start_line=op.line,
                     start_column=op.column,
@@ -74,25 +74,23 @@ def get_specified_block_range(file,
                 if close_counter == number_of_encaps:
                     cl_limit = True
 
-    return tuple(ranges)
+    return tuple(indent_ranges)
 
 
 def get_valid_sequences(file,
                         sequence,
-                        annotation_dict,
-                        encapsulators=None,
-                        check_ending=False):
+                        ranges,
+                        check_encapsulators=False,
+                        check_ending=False,
+                        keyword=False):
     """
     A vaild sequence is a sequence that is outside of comments or strings.
 
     :param file:            File that needs to be checked in the form of
                             a list of strings.
     :param sequence:        Sequence whose validity is to be checked.
-    :param annotation_dict: A dictionary containing sourceranges of all the
-                            strings and comments within a file.
-    :param encapsulators:   A tuple of SourceRanges of code regions
-                            trapped in between a matching pair of
-                            encapsulators.
+    :param ranges:          A dict contating ranges of various code
+                            segments.
     :param check_ending:    Check whether sequence falls at the end of the
                             line.
     :return:                A tuple of AbsolutePosition's of all occurances
@@ -109,13 +107,13 @@ def get_valid_sequences(file,
         sequence_line_text = file[sequence_position.line - 1]
 
         # ignore if within string
-        for string in annotation_dict['strings']:
+        for string in ranges['strings']:
             if(gt_eq(sequence_position, string.start) and
                lt_eq(sequence_position, string.end)):
                 valid = False
 
         # ignore if within comments
-        for comment in annotation_dict['comments']:
+        for comment in ranges['comments']:
             if(gt_eq(sequence_position, comment.start) and
                lt_eq(sequence_position, comment.end)):
                 valid = False
@@ -127,8 +125,8 @@ def get_valid_sequences(file,
                     :comment.start.column - 1] + sequence_line_text[
                     comment.end.column-1:]
 
-        if encapsulators:
-            for encapsulator in encapsulators:
+        if check_encapsulators:
+            for encapsulator in ranges["encapsulators"]:
                 if(gt_eq(sequence_position, encapsulator.start) and
                    lt_eq(sequence_position, encapsulator.end)):
                     valid = False
