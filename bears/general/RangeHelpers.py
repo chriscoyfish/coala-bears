@@ -93,6 +93,8 @@ def get_valid_sequences(file,
                             segments.
     :param check_ending:    Check whether sequence falls at the end of the
                             line.
+    :param keyword:         A boolean which filters occurrances of sequence
+                            which are not actually keywords.
     :return:                A tuple of AbsolutePosition's of all occurances
                             of sequence outside of string's and comments.
     """
@@ -133,6 +135,24 @@ def get_valid_sequences(file,
 
         if not sequence_line_text.rstrip().endswith(':') and check_ending:
             valid = False
+
+        if(keyword and
+                (sequence_position.column - 2 != -1 or
+                 file[sequence_position.line - 1]
+                 [sequence_position.column - 2].strip() == "")):
+            valid = False
+            for encapsulator in ranges["encapsulators"]:
+                if encapsulator.start.line == sequence_position.line:
+                    if(sequence_position.column + len(sequence) <=
+                            encapsulator.start.column and
+                            file[sequence_position.line - 1]
+                                [sequence_position.column + len(sequence) - 1:
+                                 encapsulator.start.column - 1].strip() == ""):
+                        valid = True
+            if (file[sequence_position.line - 1]
+                    [sequence_position.column + len(sequence) - 1].strip()
+                    == ""):
+                valid = True
 
         if valid:
             sequence_positions += (sequence_position,)
