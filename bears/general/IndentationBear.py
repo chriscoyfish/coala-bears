@@ -27,6 +27,7 @@ class IndentationBear(LocalBear):
             language: str,
             use_spaces: bool=True,
             tab_width: int=4,
+            indent_on_keywords: bool=False,
             coalang_dir: str=None):
         """
         It is a generic indent bear, which looks for a start and end
@@ -38,13 +39,18 @@ class IndentationBear(LocalBear):
         It also figures out hanging indents and absolute indentation of function
         params or list elements.
 
-        It does not however support  indents based on keywords yet.
+        It also supports indents based on keywords.
         for example:
 
             if(something)
-            does not get indented
+            gets indented
 
-        undergoes no change.
+        changes to:
+
+            if(something)
+                gets indented
+
+        if the setting ``indent_on_keywords`` is true.
 
         WARNING: The IndentationBear is experimental right now, you can report
         any issues found to https://github.com/coala-analyzer/coala-bears
@@ -62,6 +68,9 @@ class IndentationBear(LocalBear):
         :param tab_width:
             No. of spaces to insert for indentation.
             Only Applicable if use_spaces is False.
+        :param indent_on_keywords:
+            If True it treats some keywords as indent specifiers and
+            indents the statement that follows.
         :param coalang_dir:
             Full path of external directory containing the coalang
             file for language.
@@ -76,6 +85,15 @@ class IndentationBear(LocalBear):
             indent_types[':'] = ''
         else:
             indent_types = dict(lang_settings_dict["indent_types"])
+
+        indent_keywords = []
+        if indent_on_keywords:
+            try:
+                indent_keywords = list(lang_settings_dict["indent_keywords"])
+            except IndexError:  # pragma: no cover
+                return [Result(self,
+                               "indent_keywords specification not in coalang",
+                               RESULT_SEVERITY.MAJOR)]
 
         encapsulators = (dict(lang_settings_dict["encapsulators"]) if
                          "encapsulators" in lang_settings_dict else {})
@@ -128,6 +146,11 @@ class IndentationBear(LocalBear):
             ranges,
             comments)
 
+        keyword_indent_levels = self._get_indent_keywords_range(file,
+                                                                filename,
+                                                                indent_keywords,
+                                                                ranges)
+
         absolute_indent_levels = self.get_absolute_indent_of_range(
             file,
             filename,
@@ -139,10 +162,16 @@ class IndentationBear(LocalBear):
         new_file = self._get_basic_indent_file(no_indent_file,
                                                indent_levels,
                                                insert)
+        if indent_on_keywords:
+            new_file = self._get_keyword_indented_file(new_file,
+                                                       keyword_indent_levels,
+                                                       ranges,
+                                                       insert)
         new_file = self._get_absolute_indent_file(new_file,
                                                   absolute_indent_levels,
                                                   indent_levels,
                                                   insert)
+
         if new_file != list(file):
             wholediff = Diff.from_string_arrays(file, new_file)
             for diff in wholediff.split_diff():
@@ -152,6 +181,64 @@ class IndentationBear(LocalBear):
                     severity=RESULT_SEVERITY.INFO,
                     affected_code=(diff.range(filename),),
                     diffs={filename: diff})
+
+    def _get_indent_keywords_range(self,
+                                   file,
+                                   filename,
+                                   indent_keywords,
+                                   ranges):
+        keyword_pos = {}
+        for keyword in indent_keywords:
+            keyword_pos[keyword] = (tuple(get_valid_sequences(file,
+                                                              keyword,
+                                                              ranges,
+                                                              keyword=True)))
+        keyword_range = []
+        for keyword in keyword_pos:
+            for position in keyword_pos[keyword]:
+                start = position
+                end = AbsolutePosition(file, position.position + len(keyword))
+                for encapsulator in ranges["encapsulators"]:
+                    if (encapsulator.start.line == position.line and
+                            encapsulator.end.line > end.line):
+                        end = encapsulator.end
+                indent = True
+                for _range in ranges["indent_ranges"]:
+                    if(_range.start.line == end.line and
+                            _range.start.column > position.column):
+                        indent = False
+                        break
+                if indent:
+                    keyword_range.append(SourceRange.from_values(
+                        filename,
+                        start_line=start.line,
+                        start_column=start.column,
+                        end_line=end.line,
+                        end_column=end.column))
+        return keyword_range
+
+    def _get_keyword_indented_file(self,
+                                   file,
+                                   keyword_ranges,
+                                   ranges,
+                                   insert):
+        for _range in keyword_ranges:
+            prev_indent = get_indent_of_line(file,
+                                             _range.start.line - 1,
+                                             length=False)
+            file[_range.end.line] = (prev_indent + insert +
+                                     file[_range.end.line].lstrip())
+            start = _range.end
+            end = _range.end
+            for encapsulator in ranges["encapsulators"]:
+                if(encapsulator.start.line == start.line + 1
+                        and encapsulator.end > end):
+                    end = encapsulator.end
+            for line in range(start.line, end.line):
+                file[line] = (prev_indent + insert +
+                              file[line].lstrip())
+
+        return file
 
     def _get_no_indent_file(self, file):
         no_indent_file = [line.lstrip() if line.lstrip() else "\n"
