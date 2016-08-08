@@ -97,18 +97,13 @@ class IndentationBear(LocalBear):
 
         encapsulators = (dict(lang_settings_dict["encapsulators"]) if
                          "encapsulators" in lang_settings_dict else {})
-
-        encaps_pos = []
-        for encapsulator in encapsulators:
-            encaps_pos += get_specified_block_range(
-                file, filename,
-                encapsulator, encapsulators[encapsulator],
-                annotation_dict)
-        encaps_pos = tuple(sorted(encaps_pos, key=lambda x: x.start.line))
-
-        ranges['encapsulators'] = encaps_pos
         ranges['strings'] = annotation_dict['strings']
         ranges['comments'] = annotation_dict['comments']
+        ranges['encapsulators'] = self._calculate_encapsulators_range(
+            file,
+            filename,
+            encapsulators,
+            ranges)
         comments = dict(lang_settings_dict["comment_delimiter"])
         comments.update(
             dict(lang_settings_dict["multiline_comment_delimiters"]))
@@ -154,7 +149,8 @@ class IndentationBear(LocalBear):
         absolute_indent_levels = self.get_absolute_indent_of_range(
             file,
             filename,
-            ranges)
+            ranges,
+            encapsulators)
 
         insert = ' '*tab_width if use_spaces else '\t'
 
@@ -240,6 +236,23 @@ class IndentationBear(LocalBear):
 
         return file
 
+    def _calculate_encapsulators_range(self,
+                                       file,
+                                       filename,
+                                       encapsulators,
+                                       ranges):
+        encaps_pos = []
+        for encapsulator in encapsulators:
+            encaps_pos += get_specified_block_range(
+                file,
+                filename,
+                encapsulator,
+                encapsulators[encapsulator],
+                ranges)
+        encaps_pos = tuple(sorted(encaps_pos, key=lambda x: (x.start.line,
+                                                             x.start.column)))
+        return encaps_pos
+
     def _get_no_indent_file(self, file):
         no_indent_file = [line.lstrip() if line.lstrip() else "\n"
                           for line_nr, line in enumerate(file)]
@@ -274,7 +287,8 @@ class IndentationBear(LocalBear):
     def get_absolute_indent_of_range(self,
                                      file,
                                      filename,
-                                     ranges):
+                                     ranges,
+                                     encapsulators):
         """
         Gets the absolute indentation of all the encapsulators.
 
@@ -282,10 +296,19 @@ class IndentationBear(LocalBear):
         :param filename:        Name of file.
         :param ranges:          A dict contating ranges of various code
                                 segments.
+        :param encapsulators:   A dict which contains specifications for
+                                start and end of certain code-segments.
         :return:                A tuple of tuples with first element as the
                                 range of encapsulator and second element as the
                                 indent of its elements.
         """
+        # Recaulculating since encapsulators will change after applying keyword
+        # based indentation.
+        ranges['encapsulators'] = self._calculate_encapsulators_range(
+            file,
+            filename,
+            encapsulators,
+            ranges)
         indent_of_range = []
         for encaps in ranges["encapsulators"]:
             indent = get_element_indent(file, encaps)
